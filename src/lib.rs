@@ -13,11 +13,12 @@
 
 use nom::bytes::streaming::{is_not, tag, take_while_m_n};
 use nom::character::streaming::{char, multispace1};
-use nom::combinator::{flat_map, map, map_opt, map_res, opt, value, verify};
+use nom::combinator::{flat_map, map, opt, value, verify};
+use nom::error::{ErrorKind as nomErrKind, ParseError};
 use nom::sequence::{delimited, preceded};
 use nom::{
-    branch::alt, error::ParseError, multi::fold_many0, AsBytes, AsChar, Compare, IResult,
-    InputIter, InputLength, InputTake, Slice,
+    branch::alt, multi::fold_many0, AsBytes, AsChar, Compare, IResult, InputIter, InputLength,
+    InputTake, Slice,
 };
 use std::{borrow::Cow, ops::RangeFrom};
 
@@ -51,30 +52,41 @@ impl<T> MyInput for T where
 {
 }
 
+#[inline]
+fn nome_from_error_kind<I, E>(input: I, kind: nomErrKind) -> nom::Err<E>
+where
+    E: ParseError<I>,
+{
+    nom::Err::Error(E::from_error_kind(input, kind))
+}
+
 /// Parse a unicode sequence, of the form u{XXXX}, where XXXX is 1 to 6
 /// hexadecimal numerals. We will combine this later with parse_escaped_char
 /// to parse sequences like \u{00AC}.
-fn parse_unicode<E, Input>(input: Input) -> IResult<Input, char, E>
+fn parse_unicode<I, E>(input: I) -> IResult<I, char, E>
 where
-    E: ParseError<Input>,
-    Input: MyInput,
-    <Input as nom::InputIter>::Item: AsChar,
+    E: ParseError<I>,
+    I: MyInput,
+    <I as nom::InputIter>::Item: AsChar,
 {
+    let i = input.clone();
+
     // parse u{XXXX}.
     // XXXX: match between 1 and 6 hexadecimal numerals
-    let parse_delimited_hex = delimited(
+    let (input, hex) = delimited(
         tag("u{"),
-        take_while_m_n(1, 6, <Input as nom::InputIter>::Item::is_hex_digit),
+        take_while_m_n(1, 6, AsChar::is_hex_digit),
         char('}'),
-    );
+    )(input)?;
 
-    let parse_u32 = map_res(parse_delimited_hex, move |hex: Input| {
-        u32::from_str_radix(std::str::from_utf8(hex.as_bytes()).unwrap(), 16)
-    });
+    // convert hex to u32
+    let o2 = u32::from_str_radix(std::str::from_utf8(hex.as_bytes()).unwrap(), 16)
+        .map_err(|_| nome_from_error_kind(i.clone(), nomErrKind::MapRes))?;
 
     // In this case, because not all u32 values are valid unicode
     // code points, we have to fallibly convert to char with from_u32.
-    map_opt(parse_u32, std::char::from_u32)(input)
+    let o3 = std::char::from_u32(o2).ok_or_else(|| nome_from_error_kind(i, nomErrKind::MapOpt))?;
+    Ok((input, o3))
 }
 
 fn eval_escape(x: char) -> Option<char> {
@@ -89,11 +101,11 @@ fn eval_escape(x: char) -> Option<char> {
     })
 }
 
-fn parse_escaped_char<E, Input>(input: Input) -> IResult<Input, char, E>
+fn parse_escaped_char<I, E>(input: I) -> IResult<I, char, E>
 where
-    E: ParseError<Input>,
-    Input: InputIter + Slice<RangeFrom<usize>>,
-    <Input as nom::InputIter>::Item: AsChar,
+    E: ParseError<I>,
+    I: InputIter + Slice<RangeFrom<usize>>,
+    <I as nom::InputIter>::Item: AsChar,
 {
     match input.iter_elements().next() {
         None => Err(nom::Err::Incomplete(nom::Needed::Size(1))),
@@ -101,46 +113,41 @@ where
             if let Some(x2) = eval_escape(x.as_char()) {
                 Ok((input.slice(input.slice_index(1).unwrap()..), x2))
             } else {
-                Err(nom::Err::Error(E::from_error_kind(
-                    input,
-                    nom::error::ErrorKind::Alt,
-                )))
+                Err(nome_from_error_kind(input, nomErrKind::Alt))
             }
         }
     }
 }
 
 /// Parse a non-empty block of text that doesn't include \ or "
-fn parse_literal<E, Input>(input: Input) -> IResult<Input, Input, E>
+fn parse_literal<I, E>(input: I) -> IResult<I, I, E>
 where
-    E: ParseError<Input>,
-    Input: MyInput,
-    for<'a> &'a str: InputLength + nom::FindToken<<Input as nom::InputTakeAtPosition>::Item>,
+    E: ParseError<I>,
+    I: MyInput,
+    for<'a> &'a str: InputLength + nom::FindToken<<I as nom::InputTakeAtPosition>::Item>,
 {
     // In this case, we want to ensure that the output of is_not is non-empty.
-    verify(is_not("\"\\"), |s: &Input| s.input_len() != 0)(input)
+    verify(is_not("\"\\"), |s: &I| s.input_len() != 0)(input)
 }
 
 /// A string fragment contains a fragment of a string being parsed: either
 /// a non-empty Literal (a series of non-escaped characters), a single
 /// parsed escaped character, or a block of escaped whitespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StringFragment<Input> {
-    Literal(Input),
+enum StringFragment<I> {
+    Literal(I),
     EscapedChar(char),
     EscapedWS,
 }
 
 /// Combine parse_literal and parse_escaped_char into a StringFragment.
-fn parse_fragment<E, Input>(
-    delim: char,
-) -> impl Fn(Input) -> IResult<Input, StringFragment<Input>, E>
+fn parse_fragment<I, E>(delim: char) -> impl Fn(I) -> IResult<I, StringFragment<I>, E>
 where
-    E: ParseError<Input>,
-    Input: MyInput,
-    <Input as nom::InputIter>::Item: AsChar,
-    <Input as nom::InputTakeAtPosition>::Item: AsChar + Clone,
-    for<'a> &'a str: InputLength + nom::FindToken<<Input as nom::InputTakeAtPosition>::Item>,
+    E: ParseError<I>,
+    I: MyInput,
+    <I as nom::InputIter>::Item: AsChar,
+    <I as nom::InputTakeAtPosition>::Item: AsChar + Clone,
+    for<'a> &'a str: InputLength + nom::FindToken<<I as nom::InputTakeAtPosition>::Item>,
 {
     alt((
         // The `map` combinator runs a parser, then applies a function to the output
@@ -161,9 +168,9 @@ where
     ))
 }
 
-fn fragment_fold<'i, Input: AsBytes + ?Sized + 'i>(
+fn fragment_fold<'i, I: AsBytes + ?Sized + 'i>(
     mut string: Cow<'i, [u8]>,
-    fragment: StringFragment<&'i Input>,
+    fragment: StringFragment<&'i I>,
 ) -> Cow<'i, [u8]> {
     match fragment {
         StringFragment::Literal(s) => string.to_mut().extend_from_slice(s.as_bytes()),
@@ -181,16 +188,14 @@ fn fragment_fold<'i, Input: AsBytes + ?Sized + 'i>(
 
 /// Parse a string. Use a loop of parse_fragment and push all of the fragments
 /// into an output string.
-pub fn parse_string<'i, E, Input>(
-    delim: char,
-) -> impl Fn(&'i Input) -> IResult<&'i Input, Cow<'i, [u8]>, E>
+pub fn parse_string<'i, I, E>(delim: char) -> impl Fn(&'i I) -> IResult<&'i I, Cow<'i, [u8]>, E>
 where
-    E: ParseError<&'i Input>,
-    Input: AsBytes + ?Sized + 'i,
-    &'i Input: MyInput + PartialEq,
-    <&'i Input as nom::InputIter>::Item: AsChar,
-    <&'i Input as nom::InputTakeAtPosition>::Item: AsChar + Clone,
-    for<'a> &'a str: InputLength + nom::FindToken<<&'i Input as nom::InputTakeAtPosition>::Item>,
+    E: ParseError<&'i I>,
+    I: AsBytes + ?Sized + 'i,
+    &'i I: MyInput + PartialEq,
+    <&'i I as nom::InputIter>::Item: AsChar,
+    <&'i I as nom::InputTakeAtPosition>::Item: AsChar + Clone,
+    for<'a> &'a str: InputLength + nom::FindToken<<&'i I as nom::InputTakeAtPosition>::Item>,
 {
     debug_assert!(delim != '\\');
 
@@ -201,7 +206,7 @@ where
     delimited(
         char(delim),
         flat_map(
-            opt(map(parse_literal, Input::as_bytes)),
+            opt(map(parse_literal, I::as_bytes)),
             move |init: Option<&'i [u8]>| {
                 fold_many0(
                     parse_fragment(delim),
@@ -224,7 +229,7 @@ mod tests {
 
     #[test]
     fn test0() {
-        let sprs = parse_string::<(), _>('"');
+        let sprs = parse_string::<_, ()>('"');
         let res = sprs(b"\"abc\"".as_ref());
         assert_eq!(
             res.as_ref().map(cwtr),
