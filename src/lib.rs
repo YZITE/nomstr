@@ -11,6 +11,13 @@
 //! - an escape followed by whitespace consumes all whitespace between the
 //!   escape and the next non-whitespace character
 
+#![no_std]
+
+extern crate alloc;
+extern crate core;
+
+use alloc::borrow::Cow;
+use core::ops::RangeFrom;
 use nom::bytes::streaming::{is_not, tag, take_while_m_n};
 use nom::character::streaming::{char, multispace1};
 use nom::combinator::{flat_map, map, opt, value, verify};
@@ -20,7 +27,9 @@ use nom::{
     branch::alt, multi::fold_many0, AsBytes, AsChar, Compare, IResult, InputIter, InputLength,
     InputTake, Slice,
 };
-use std::{borrow::Cow, ops::RangeFrom};
+
+mod raw;
+pub use raw::parse_raw_string;
 
 // parser combinators are constructed from the bottom up:
 // first we write parsers for the smallest elements (escaped characters),
@@ -80,12 +89,12 @@ where
     )(input)?;
 
     // convert hex to u32
-    let o2 = u32::from_str_radix(std::str::from_utf8(hex.as_bytes()).unwrap(), 16)
+    let o2 = u32::from_str_radix(core::str::from_utf8(hex.as_bytes()).unwrap(), 16)
         .map_err(|_| nome_from_error_kind(i.clone(), nomErrKind::MapRes))?;
 
     // In this case, because not all u32 values are valid unicode
     // code points, we have to fallibly convert to char with from_u32.
-    let o3 = std::char::from_u32(o2).ok_or_else(|| nome_from_error_kind(i, nomErrKind::MapOpt))?;
+    let o3 = core::char::from_u32(o2).ok_or_else(|| nome_from_error_kind(i, nomErrKind::MapOpt))?;
     Ok((input, o3))
 }
 
