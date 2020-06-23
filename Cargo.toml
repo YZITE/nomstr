@@ -1,0 +1,21 @@
+[package]
+name = "yz-nomstr"
+version = "0.1.0"
+authors = [
+    "Eijebong <eijebong@bananium.fr>",
+    "Geal <contact@geoffroycouprie.com>",
+    "Lucretiel <Lucretiel@gmail.com>",
+    "zserik <zseri.devel@ytrizja.de>",
+]
+edition = "2018"
+license = "MIT"
+
+[dependencies]
+
+[dependencies.bstr]
+version = "0.2"
+default-features = false
+
+[dependencies.nom]
+version = "5.1"
+default-features = false
