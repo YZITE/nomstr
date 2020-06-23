@@ -12,10 +12,6 @@ license = "MIT"
 
 [dependencies]
 
-[dependencies.bstr]
-version = "0.2"
-default-features = false
-
 [dependencies.nom]
 version = "5.1"
 default-features = false
