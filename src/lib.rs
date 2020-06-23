@@ -11,7 +11,7 @@
 
 use bstr::ByteSlice;
 use nom::branch::alt;
-use nom::bytes::streaming::{is_not, take_while_m_n};
+use nom::bytes::streaming::{is_not, tag, take_while_m_n};
 use nom::character::streaming::{char, multispace1};
 use nom::combinator::{flat_map, map, map_opt, map_res, opt, value, verify};
 use nom::sequence::{delimited, preceded};
@@ -30,15 +30,8 @@ fn parse_unicode<'a, E: ParseError<&'a [u8]>>(input: &'a [u8]) -> IResult<&'a [u
     // a predicate. `parse_hex` here parses between 1 and 6 hexadecimal numerals.
     let parse_hex = take_while_m_n(1, 6, |c: u8| c.is_ascii_hexdigit());
 
-    // `preceeded` takes a prefix parser, and if it succeeds, returns the result
-    // of the body parser. In this case, it parses u{XXXX}.
-    let parse_delimited_hex = preceded(
-        char('u'),
-        // `delimited` is like `preceded`, but it parses both a prefix and a suffix.
-        // It returns the result of the middle parser. In this case, it parses
-        // {XXXX}, where XXXX is 1 to 6 hex numerals, and returns XXXX
-        delimited(char('{'), parse_hex, char('}')),
-    );
+    // parse u{XXXX}.
+    let parse_delimited_hex = delimited(tag("u{"), parse_hex, char('}'));
 
     // `map_res` takes the result of a parser and applies a function that returns
     // a Result. In this case we take the hex bytes from parse_hex and attempt to
@@ -86,15 +79,8 @@ fn parse_escaped_char<'a, E: ParseError<&'a [u8]>>(input: &'a [u8]) -> IResult<&
 
 /// Parse a non-empty block of text that doesn't include \ or "
 fn parse_literal<'a, E: ParseError<&'a [u8]>>(input: &'a [u8]) -> IResult<&'a [u8], &'a [u8], E> {
-    // `is_not` parses a string of 0 or more characters that aren't one of the
-    // given characters.
-    let not_quote_slash = is_not("\"\\");
-
-    // `verify` runs a parser, then runs a verification function on the output of
-    // the parser. The verification function accepts out output only if it
-    // returns true. In this case, we want to ensure that the output of is_not
-    // is non-empty.
-    verify(not_quote_slash, |s: &[u8]| !s.is_empty())(input)
+    // In this case, we want to ensure that the output of is_not is non-empty.
+    verify(is_not("\"\\"), |s: &[u8]| !s.is_empty())(input)
 }
 
 /// A string fragment contains a fragment of a string being parsed: either
@@ -210,6 +196,9 @@ mod tests {
     fn test0() {
         let res = parse_string::<()>(b"\"abc\"");
         assert_eq!(res.as_ref().map(cwtr), Ok((B(b""), B(b"abc"))));
+        if let Cow::Owned(_) = res.unwrap().1 {
+            unreachable!();
+        }
 
         let data = b"\"tab:\\tafter tab, newline:\\nnew line, quote: \\\", emoji: \\u{1F602}, newline:\\nescaped whitespace: \\    abc\"";
         let tmp = parse_string::<()>(data);
