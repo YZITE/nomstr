@@ -1,5 +1,6 @@
 [package]
 name = "yz-nomstr"
+description = "A simple escaped string literal parser using nom"
 version = "0.1.0"
 authors = [
     "Eijebong <eijebong@bananium.fr>",
@@ -9,9 +10,10 @@ authors = [
 ]
 edition = "2018"
 license = "MIT"
+repository = "https://github.com/YZITE/nomstr"
 
 [dependencies]
 
 [dependencies.nom]
-version = "5.1"
+version = "5"
 default-features = false

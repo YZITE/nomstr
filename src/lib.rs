@@ -1,3 +1,5 @@
+//! [original source](https://github.com/Geal/nom/blob/47fdc2dd94bd113f4a95dd0c29188616ab83e182/examples/string.rs)
+//!
 //! This example shows an example of how to parse an escaped string. The
 //! rules for the string are similar to JSON and rust. A string is:
 //!
@@ -9,14 +11,13 @@
 //! - an escape followed by whitespace consumes all whitespace between the
 //!   escape and the next non-whitespace character
 
-use nom::branch::alt;
 use nom::bytes::streaming::{is_not, tag, take_while_m_n};
 use nom::character::streaming::{char, multispace1};
 use nom::combinator::{flat_map, map, map_opt, map_res, opt, value, verify};
 use nom::sequence::{delimited, preceded};
 use nom::{
-    error::ParseError, multi::fold_many0, AsBytes, AsChar, Compare, IResult, InputIter,
-    InputLength, InputTake, Slice,
+    branch::alt, error::ParseError, multi::fold_many0, AsBytes, AsChar, Compare, IResult,
+    InputIter, InputLength, InputTake, Slice,
 };
 use std::{borrow::Cow, ops::RangeFrom};
 
