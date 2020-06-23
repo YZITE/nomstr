@@ -103,7 +103,7 @@ where
         None => Err(nom::Err::Incomplete(nom::Needed::Size(1))),
         Some(x) => {
             if let Some(x2) = eval_escape(x.as_char()) {
-                Ok((input.slice(1..), x2))
+                Ok((input.slice(input.slice_index(1).unwrap()..), x2))
             } else {
                 Err(nom::Err::Error(E::from_error_kind(
                     input,
