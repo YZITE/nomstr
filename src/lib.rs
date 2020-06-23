@@ -196,3 +196,29 @@ fn main() {
   println!("Result:\n\n{}", result.unwrap().1);
 }
 */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bstr::B;
+
+    fn cwtr<'a>(x: &'a (&'a [u8], Cow<'a, [u8]>)) -> (&'a [u8], &'a [u8]) {
+        (x.0, &*x.1)
+    }
+
+    #[test]
+    fn test0() {
+        let res = parse_string::<()>(b"\"abc\"");
+        assert_eq!(res.as_ref().map(cwtr), Ok((B(b""), B(b"abc"))));
+
+        let data = b"\"tab:\\tafter tab, newline:\\nnew line, quote: \\\", emoji: \\u{1F602}, newline:\\nescaped whitespace: \\    abc\"";
+        let tmp = parse_string::<()>(data);
+        assert_eq!(
+          tmp.as_ref().map(cwtr),
+          Ok((
+            B(b""),
+            "tab:\tafter tab, newline:\nnew line, quote: \", emoji: 😂, newline:\nescaped whitespace: abc".as_bytes()
+          ))
+        );
+    }
+}
