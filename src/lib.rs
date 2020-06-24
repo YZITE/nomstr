@@ -226,7 +226,7 @@ where
 mod tests {
     use super::*;
 
-    fn cwtr<'a>(x: &'a (&'a [u8], Cow<'a, [u8]>)) -> (&'a [u8], &'a [u8]) {
+    fn cwtr<'a, T: Copy>(x: &'a (T, Cow<'a, [u8]>)) -> (T, &'a [u8]) {
         (x.0, &*x.1)
     }
 
@@ -251,5 +251,12 @@ mod tests {
             "tab:\tafter tab, newline:\nnew line, quote: \", emoji: 😂, newline:\nescaped whitespace: abc".as_bytes()
           ))
         );
+    }
+
+    #[test]
+    fn test1() {
+        let sprs = parse_string::<_, ()>('\'');
+        let res = sprs("'abc'");
+        assert_eq!(res.as_ref().map(cwtr), Ok(("", "abc".as_bytes())));
     }
 }
