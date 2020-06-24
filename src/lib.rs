@@ -18,9 +18,9 @@ extern crate core;
 
 use alloc::borrow::Cow;
 use core::ops::RangeFrom;
-use nom::bytes::streaming::{is_not, tag, take_while_m_n};
+use nom::bytes::streaming::{tag, take_till1, take_while_m_n};
 use nom::character::streaming::{char, multispace1};
-use nom::combinator::{flat_map, map, opt, value, verify};
+use nom::combinator::{flat_map, map, opt, value};
 use nom::error::{ErrorKind as nomErrKind, ParseError};
 use nom::sequence::{delimited, preceded};
 use nom::{
@@ -98,45 +98,41 @@ where
     Ok((input, o3))
 }
 
-fn eval_escape(x: char) -> Option<char> {
-    Some(match x {
+fn parse_escaped_char<I, E>(input: I) -> IResult<I, char, E>
+where
+    E: ParseError<I>,
+    I: InputIter + Slice<RangeFrom<usize>>,
+    <I as nom::InputIter>::Item: AsChar + Copy,
+{
+    let x = input
+        .iter_elements()
+        .next()
+        .ok_or(nom::Err::Incomplete(nom::Needed::Size(1)))?;
+    let xr = match x.as_char() {
         'n' => '\n',
         'r' => '\r',
         't' => '\t',
         'b' => '\u{08}',
         'f' => '\u{0C}',
-        '\\' | '/' => x,
-        _ => return None,
-    })
-}
-
-fn parse_escaped_char<I, E>(input: I) -> IResult<I, char, E>
-where
-    E: ParseError<I>,
-    I: InputIter + Slice<RangeFrom<usize>>,
-    <I as nom::InputIter>::Item: AsChar,
-{
-    match input.iter_elements().next() {
-        None => Err(nom::Err::Incomplete(nom::Needed::Size(1))),
-        Some(x) => {
-            if let Some(x2) = eval_escape(x.as_char()) {
-                Ok((input.slice(input.slice_index(1).unwrap()..), x2))
-            } else {
-                Err(nome_from_error_kind(input, nomErrKind::Alt))
-            }
-        }
-    }
+        xc @ '\\' | xc @ '/' => xc,
+        _ => return Err(nome_from_error_kind(input, nomErrKind::OneOf)),
+    };
+    Ok((input.slice(x.len()..), xr))
 }
 
 /// Parse a non-empty block of text that doesn't include \ or "
-fn parse_literal<I, E>(input: I) -> IResult<I, I, E>
+fn parse_literal<I, E>(delim: char) -> impl Fn(I) -> IResult<I, I, E>
 where
     E: ParseError<I>,
     I: MyInput,
-    for<'a> &'a str: InputLength + nom::FindToken<<I as nom::InputTakeAtPosition>::Item>,
+    <I as nom::InputTakeAtPosition>::Item: AsChar,
 {
-    // In this case, we want to ensure that the output of is_not is non-empty.
-    verify(is_not("\"\\"), |s: &I| s.input_len() != 0)(input)
+    take_till1(
+        move |i: <I as nom::InputTakeAtPosition>::Item| match i.as_char() {
+            '\\' => true,
+            j => j == delim,
+        },
+    )
 }
 
 /// A string fragment contains a fragment of a string being parsed: either
@@ -154,14 +150,13 @@ fn parse_fragment<I, E>(delim: char) -> impl Fn(I) -> IResult<I, StringFragment<
 where
     E: ParseError<I>,
     I: MyInput,
-    <I as nom::InputIter>::Item: AsChar,
-    <I as nom::InputTakeAtPosition>::Item: AsChar + Clone,
-    for<'a> &'a str: InputLength + nom::FindToken<<I as nom::InputTakeAtPosition>::Item>,
+    <I as nom::InputIter>::Item: AsChar + Copy,
+    <I as nom::InputTakeAtPosition>::Item: AsChar + Copy,
 {
     alt((
         // The `map` combinator runs a parser, then applies a function to the output
         // of that parser.
-        map(parse_literal, StringFragment::Literal),
+        map(parse_literal(delim), StringFragment::Literal),
         preceded(
             char('\\'),
             alt((
@@ -202,9 +197,8 @@ where
     E: ParseError<&'i I>,
     I: AsBytes + ?Sized + 'i,
     &'i I: MyInput + PartialEq,
-    <&'i I as nom::InputIter>::Item: AsChar,
-    <&'i I as nom::InputTakeAtPosition>::Item: AsChar + Clone,
-    for<'a> &'a str: InputLength + nom::FindToken<<&'i I as nom::InputTakeAtPosition>::Item>,
+    <&'i I as nom::InputIter>::Item: AsChar + Copy,
+    <&'i I as nom::InputTakeAtPosition>::Item: AsChar + Copy,
 {
     debug_assert!(delim != '\\');
 
@@ -215,7 +209,7 @@ where
     delimited(
         char(delim),
         flat_map(
-            opt(map(parse_literal, I::as_bytes)),
+            opt(map(parse_literal(delim), I::as_bytes)),
             move |init: Option<&'i [u8]>| {
                 fold_many0(
                     parse_fragment(delim),
